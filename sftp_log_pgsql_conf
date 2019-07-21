@@ -1,0 +1,4 @@
+# Put in ETC folder of OpenSSH install
+# rename to 'sftp_plugin_conf'
+# e.g. /usr/local/etc/sftp_plugin_conf
+sftplogpgsql AFTER 

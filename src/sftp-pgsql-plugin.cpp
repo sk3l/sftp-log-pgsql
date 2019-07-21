@@ -1,3 +1,5 @@
+#include <sys/types.h>
+
 #include <fstream>
 #include <memory>
 #include <sstream>
@@ -8,12 +10,12 @@
 #include "sftp-plugin.h"
 
 static std::unique_ptr<pqxx::connection> dbConn_;
-static std::string connStr_ = "postgres://sftpngdb:abc123@127.0.0.1/sftpauthdb";
+static std::string connStr_ = "postgres://sftpadmin:abc123@127.0.0.1/postgres";
 using sqlconn_t = pqxx::connection; 
 
 static std::unique_ptr<std::ofstream> log_;
 
-static void init()
+static int init()
 {
     if (log_ == nullptr)
         log_.reset(new std::ofstream("/tmp/sftp-log-pgsql.log"));
@@ -27,12 +29,14 @@ static void init()
                       << std::endl;   
             dbConn_.reset(new sqlconn_t(connStr_));
         }
+        return 0;
     }
     catch (const pqxx::failure & e)
     {
         *(log_.get()) << "Error initializing PgSQL conn: "
                       << e.what()
                       << std::endl;   
+        return 1;
     }
 }
 
@@ -45,7 +49,7 @@ static void do_sql(const std::string & data)
 
          dbConn_->prepare(
          "sftp_pgin_ins",
-         "insert into public.sftp_log (log_event) values ($1)"
+         "insert into public.sftp_logs (log_event) values ($1)"
         );
 
         pqxx::work pqw(*dbConn_);
@@ -60,14 +64,15 @@ static void do_sql(const std::string & data)
      }    
 }
 
-extern "C" int sftp_cf_open_file(uint32_t rqstid,
+extern "C" int sftp_cf_open_file(u_int32_t rqstid,
         const char * filename,
-        uint32_t access,
-        uint32_t flags,
-        uint32_t attrs,
+        u_int32_t access,
+        u_int32_t flags,
+        u_int32_t attrs,
         enum PLUGIN_SEQUENCE seq)
 {
-    init();
+    if (init() != 0)
+        return 1;
 
     *(log_.get()) << "Invoking sftp_cf_open_file()" 
                   << std::endl;
@@ -87,12 +92,13 @@ extern "C" int sftp_cf_open_file(uint32_t rqstid,
     return 0;
 }
 
-extern "C" int sftp_cf_open_dir(uint32_t rqstid,
-        const char * dirpath,
-        enum PLUGIN_SEQUENCE seq)
+extern "C" int sftp_cf_open_dir(u_int32_t rqstid,
+        const char * dirpath)
+//        enum PLUGIN_SEQUENCE seq)
 {
-    init();
-     
+    if (init() != 0)
+        return 1;
+    
     *(log_.get()) << "Invoking sftp_cf_open_dir()" 
                   << std::endl;
 
@@ -106,109 +112,109 @@ extern "C" int sftp_cf_open_dir(uint32_t rqstid,
     return 0;
 }
 
-extern "C" int sftp_cf_close(uint32_t rqstid,
+extern "C" int sftp_cf_close(u_int32_t rqstid,
         const char * handle,
         enum PLUGIN_SEQUENCE seq)
 {
-    return 1;
+    return 0;
 }
 
-extern "C" int sftp_cf_read(uint32_t rqstid,
+extern "C" int sftp_cf_read(u_int32_t rqstid,
         const char * handel,
-        uint64_t offset,
-        uint32_t length,
+        u_int64_t offset,
+        u_int32_t length,
         enum PLUGIN_SEQUENCE seq)
 {
     return 0;
 }
 
-extern "C" int sftp_cf_read_dir(uint32_t rqstid,
+extern "C" int sftp_cf_read_dir(u_int32_t rqstid,
         const char * handle,
         enum PLUGIN_SEQUENCE seq)
 {
     return 0;
 }
 
-extern "C" int sftp_cf_write(uint32_t rqstid,
+extern "C" int sftp_cf_write(u_int32_t rqstid,
         const char * handle,
-        uint64_t offset,
+        u_int64_t offset,
         const char * data,
         enum PLUGIN_SEQUENCE seq)
 {
     return 0;
 }
 
-extern "C" int sftp_cf_remove(uint32_t rqstid,
+extern "C" int sftp_cf_remove(u_int32_t rqstid,
         const char * filename,
         enum PLUGIN_SEQUENCE seq)
 {
     return 0;
 }
 
-extern "C" int sftp_cf_rename(uint32_t rqstid,
+extern "C" int sftp_cf_rename(u_int32_t rqstid,
         const char * oldfilename,
         const char * newfilename,
-        uint32_t flags,
+        u_int32_t flags,
         enum PLUGIN_SEQUENCE seq)
 {
     return 0;
 }
 
-extern "C" int sftp_cf_mkdir(uint32_t rqstid,
+extern "C" int sftp_cf_mkdir(u_int32_t rqstid,
         const char * path,
         enum PLUGIN_SEQUENCE seq)
 {
     return 0;
 }
 
-extern "C" int sftp_cf_rmdir(uint32_t rqstid,
+extern "C" int sftp_cf_rmdir(u_int32_t rqstid,
         const char * path,
         enum PLUGIN_SEQUENCE seq)
 {
     return 0;
 }
 
-extern "C" int sftp_cf_stat(uint32_t rqstid,
+extern "C" int sftp_cf_stat(u_int32_t rqstid,
         const char * path,
-        uint32_t flags,
+        u_int32_t flags,
         enum PLUGIN_SEQUENCE seq)
 {
     return 0;
 }
 
-extern "C" int sftp_cf_lstat(uint32_t rqstid,
+extern "C" int sftp_cf_lstat(u_int32_t rqstid,
         const char * path,
-        uint32_t flags,
+        u_int32_t flags,
         enum PLUGIN_SEQUENCE seq)
 {
     return 0;
 }
 
-extern "C" int sftp_cf_fstat(uint32_t rqstid,
+extern "C" int sftp_cf_fstat(u_int32_t rqstid,
         const char * handle,
-        uint32_t flags,
+        u_int32_t flags,
         enum PLUGIN_SEQUENCE seq)
 {
     return 0;
 }
 
-extern "C" int sftp_cf_setstat(uint32_t rqstid,
+extern "C" int sftp_cf_setstat(u_int32_t rqstid,
         const char * path,
-        uint32_t attrs,
+        u_int32_t attrs,
         enum PLUGIN_SEQUENCE seq)
 {
     return 0;
 }
 
-extern "C" int sftp_cf_fsetstat(uint32_t rqstid,
+extern "C" int sftp_cf_fsetstat(u_int32_t rqstid,
         const char * handle,
-        uint32_t attrs,
+        u_int32_t attrs,
         enum PLUGIN_SEQUENCE seq)
 {
     return 0;
 }
 
-extern "C" int sftp_cf_link(uint32_t rqstid,
+extern "C" int sftp_cf_link(u_int32_t rqstid,
         const char * newlink,
         const char * curlink,
         int symlink,
@@ -217,28 +223,28 @@ extern "C" int sftp_cf_link(uint32_t rqstid,
     return 0;
 }
 
-extern "C" int sftp_cf_lock(uint32_t rqstid,
+extern "C" int sftp_cf_lock(u_int32_t rqstid,
         const char * handle,
-        uint64_t offset,
-        uint64_t length,
+        u_int64_t offset,
+        u_int64_t length,
         int lockmask,
         enum PLUGIN_SEQUENCE seq)
 {
     return 0;
 }
 
-extern "C" int sftp_cf_unlock(uint32_t rqstid,
+extern "C" int sftp_cf_unlock(u_int32_t rqstid,
         const char * handle,
-        uint64_t offset,
-        uint64_t length,
+        u_int64_t offset,
+        u_int64_t length,
         enum PLUGIN_SEQUENCE seq)
 {
     return 0;
 }
 
-extern "C" int sftp_cf_realpath(uint32_t rqstid,
+extern "C" int sftp_cf_realpath(u_int32_t rqstid,
         const char * origpath,
-        uint8_t ctlbyte,
+        u_int8_t ctlbyte,
         const char * path,
         enum PLUGIN_SEQUENCE seq)
 {
