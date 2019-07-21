@@ -1,5 +1,8 @@
 #include <sys/types.h>
 
+#include <cstring>
+#include <ctime>
+#include <iomanip>
 #include <fstream>
 #include <memory>
 #include <sstream>
@@ -11,7 +14,7 @@
 
 static std::unique_ptr<pqxx::connection> dbConn_;
 static std::string connStr_ = "postgres://sftpadmin:abc123@127.0.0.1/postgres";
-using sqlconn_t = pqxx::connection; 
+using sqlconn_t = pqxx::connection;
 
 static std::unique_ptr<std::ofstream> log_;
 
@@ -25,8 +28,8 @@ static int init()
         if (dbConn_ == nullptr)
         {
             *(log_.get()) << "Initializing PgSQL conn: "
-                      << connStr_ 
-                      << std::endl;   
+                      << connStr_
+                      << std::endl;
             dbConn_.reset(new sqlconn_t(connStr_));
         }
         return 0;
@@ -35,33 +38,41 @@ static int init()
     {
         *(log_.get()) << "Error initializing PgSQL conn: "
                       << e.what()
-                      << std::endl;   
+                      << std::endl;
         return 1;
     }
 }
 
-static void do_sql(const std::string & data) 
+static void do_sql(const std::string & data)
 {
     try
-    {    
-        *(log_.get()) << "Invoking do_sql()" 
-                      << std::endl;   
+    {
+        *(log_.get()) << "Invoking do_sql()"
+                      << std::endl;
 
          dbConn_->prepare(
          "sftp_pgin_ins",
-         "insert into public.sftp_logs (log_event) values ($1)"
+         "insert into public.sftp_logs (log_event, log_time) values ($1, $2)"
         );
 
+        std::time_t t = std::time(nullptr);
+        std::tm tm = *std::localtime(&t);
+
+        std::stringstream tstmp;
+        tstmp << std::put_time(&tm, "%FT%T");
+
+        auto tsstr = tstmp.str();
+
         pqxx::work pqw(*dbConn_);
-        auto result = pqw.prepared("sftp_pgin_ins")(data).exec();
+        auto result = pqw.prepared("sftp_pgin_ins")(data)(tsstr).exec();
         pqw.commit();
     }
     catch (const pqxx::failure & e)
     {
         *(log_.get()) << "Error executing SQL: "
                       << e.what()
-                      << std::endl;   
-     }    
+                      << std::endl;
+     }
 }
 
 extern "C" int sftp_cf_open_file(u_int32_t rqstid,
@@ -73,7 +84,7 @@ extern "C" int sftp_cf_open_file(u_int32_t rqstid,
     if (init() != 0)
         return 1;
 
-    *(log_.get()) << "Invoking sftp_cf_open_file()" 
+    *(log_.get()) << "Invoking sftp_cf_open_file()"
                   << std::endl;
 
     std::stringstream ss;
@@ -96,14 +107,14 @@ extern "C" int sftp_cf_open_dir(u_int32_t rqstid,
 {
     if (init() != 0)
         return 1;
-    
-    *(log_.get()) << "Invoking sftp_cf_open_dir()" 
+
+    *(log_.get()) << "Invoking sftp_cf_open_dir()"
                   << std::endl;
 
-   
+
     std::stringstream ss;
     ss << "Received open_dir event, path ="
-       << dirpath; 
+       << dirpath;
 
     do_sql(ss.str());
 
@@ -113,20 +124,64 @@ extern "C" int sftp_cf_open_dir(u_int32_t rqstid,
 extern "C" int sftp_cf_close(u_int32_t rqstid,
         const char * handle)
 {
+    if (init() != 0)
+        return 1;
+
+    *(log_.get()) << "Invoking sftp_cf_close()"
+                  << std::endl;
+
+
+    std::stringstream ss;
+    ss << "Received close event, handle ="
+       << (u_int64_t) handle;
+
+    do_sql(ss.str());
+
     return 0;
 }
 
 extern "C" int sftp_cf_read(u_int32_t rqstid,
-        const char * handel,
+        const char * handle,
         u_int64_t offset,
         u_int32_t length)
 {
+    if (init() != 0)
+        return 1;
+
+    *(log_.get()) << "Invoking sftp_cf_read()"
+                  << std::endl;
+
+
+    std::stringstream ss;
+    ss << "Received read event,"
+       << " offset = "
+       << offset
+       << ", length = "
+       << length
+       << ", handle = "
+       << (u_int64_t) handle;
+
+    do_sql(ss.str());
+
     return 0;
 }
 
 extern "C" int sftp_cf_read_dir(u_int32_t rqstid,
         const char * handle)
 {
+    if (init() != 0)
+        return 1;
+
+    *(log_.get()) << "Invoking sftp_cf_read_dir()"
+                  << std::endl;
+
+
+    std::stringstream ss;
+    ss << "Received read dir event, handle ="
+       << (u_int64_t) handle ;
+
+    do_sql(ss.str());
+
     return 0;
 }
 
@@ -135,12 +190,43 @@ extern "C" int sftp_cf_write(u_int32_t rqstid,
         u_int64_t offset,
         const char * data)
 {
+    if (init() != 0)
+        return 1;
+
+    *(log_.get()) << "Invoking sftp_cf_write()"
+                  << std::endl;
+
+
+    std::stringstream ss;
+    ss << "Received write event,"
+       << ", offset = "
+       << offset
+       << ", length = "
+       << std::strlen(data)
+       << ", handle = "
+       << (u_int64_t) handle;
+
+    do_sql(ss.str());
+
     return 0;
 }
 
 extern "C" int sftp_cf_remove(u_int32_t rqstid,
         const char * filename)
 {
+    if (init() != 0)
+        return 1;
+
+    *(log_.get()) << "Invoking sftp_cf_remove()"
+                  << std::endl;
+
+
+    std::stringstream ss;
+    ss << "Received remove event, filename ="
+       << filename;
+
+    do_sql(ss.str());
+
     return 0;
 }
 
@@ -149,18 +235,59 @@ extern "C" int sftp_cf_rename(u_int32_t rqstid,
         const char * newfilename,
         u_int32_t flags)
 {
+    if (init() != 0)
+        return 1;
+
+    *(log_.get()) << "Invoking sftp_cf_rename()"
+                  << std::endl;
+
+
+    std::stringstream ss;
+    ss << "Received rename event, old filename ="
+       << oldfilename
+       << ", new filename ="
+       << newfilename;
+
+    do_sql(ss.str());
+
     return 0;
 }
 
 extern "C" int sftp_cf_mkdir(u_int32_t rqstid,
         const char * path)
 {
+    if (init() != 0)
+        return 1;
+
+    *(log_.get()) << "Invoking sftp_cf_mkdir()"
+                  << std::endl;
+
+
+    std::stringstream ss;
+    ss << "Received mkdir event, path ="
+       << path;
+
+    do_sql(ss.str());
+
     return 0;
 }
 
 extern "C" int sftp_cf_rmdir(u_int32_t rqstid,
         const char * path)
 {
+    if (init() != 0)
+        return 1;
+
+    *(log_.get()) << "Invoking sftp_cf_rmdir()"
+                  << std::endl;
+
+
+    std::stringstream ss;
+    ss << "Received rmdir event, path ="
+       << path;
+
+    do_sql(ss.str());
+
     return 0;
 }
 
