@@ -133,7 +133,7 @@ extern "C" int sftp_cf_close(u_int32_t rqstid,
 
     std::stringstream ss;
     ss << "Received close event, handle ="
-       << (u_int64_t) handle;
+       << handle;
 
     do_sql(ss.str());
 
@@ -159,7 +159,7 @@ extern "C" int sftp_cf_read(u_int32_t rqstid,
        << ", length = "
        << length
        << ", handle = "
-       << (u_int64_t) handle;
+       << handle;
 
     do_sql(ss.str());
 
@@ -178,7 +178,7 @@ extern "C" int sftp_cf_read_dir(u_int32_t rqstid,
 
     std::stringstream ss;
     ss << "Received read dir event, handle ="
-       << (u_int64_t) handle ;
+       << handle ;
 
     do_sql(ss.str());
 
@@ -204,7 +204,7 @@ extern "C" int sftp_cf_write(u_int32_t rqstid,
        << ", length = "
        << std::strlen(data)
        << ", handle = "
-       << (u_int64_t) handle;
+       << handle;
 
     do_sql(ss.str());
 
