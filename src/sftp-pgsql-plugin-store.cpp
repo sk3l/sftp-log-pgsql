@@ -13,7 +13,7 @@
 #include "sftp-plugin.h"
 
 static std::unique_ptr<pqxx::connection> dbConn_;
-static std::string connStr_ = "postgres://sftpadmin:abc123@127.0.0.1/postgres";
+static std::string connStr_ = "postgres://mskelton:abc123@127.0.0.1/postgres";
 using sqlconn_t = pqxx::connection;
 
 static std::unique_ptr<std::ofstream> log_;
@@ -79,7 +79,7 @@ extern "C" int sftp_cf_open_file(u_int32_t rqstid,
         const char * filename,
         u_int32_t access,
         u_int32_t flags,
-        u_int32_t attrs)
+        int * handle)
 {
     if (init() != 0)
         return 1;
@@ -93,9 +93,7 @@ extern "C" int sftp_cf_open_file(u_int32_t rqstid,
        << ", access = "
        << access
        << ", flags = "
-       << flags
-       << ", attrs = "
-       << attrs;
+       << flags;
 
     do_sql(ss.str());
 
@@ -103,21 +101,63 @@ extern "C" int sftp_cf_open_file(u_int32_t rqstid,
 }
 
 extern "C" int sftp_cf_open_dir(u_int32_t rqstid,
-        const char * dirpath)
+        const char * dirpath,
+        int * handle)
 {
     if (init() != 0)
         return 1;
 
-    *(log_.get()) << "Invoking sftp_cf_open_dir()"
+    try
+    {
+        *(log_.get()) << "Invoking sftp_cf_open_dir()"
                   << std::endl;
 
 
-    std::stringstream ss;
-    ss << "Received open_dir event, path ="
-       << dirpath;
+         std::stringstream ss;
+         ss << "Received open_dir event, path ="
+           << dirpath;
 
-    do_sql(ss.str());
+        *(log_.get()) << "Invoking sql for open_dir()"
+                      << std::endl;
+        
+         pqxx::work pqw(*dbConn_);
+         dbConn_->prepare(
+         "sftp_find_dir",
+         "select * from sftp.sftp_dir where dir_fqn = $1"
+        );
 
+        auto row = pqw.prepared("sftp_find_dir")(dirpath).exec();
+
+        if (row.size() < 1)
+        {
+            *(log_.get()) << "ERROR: Couldn't locate directory '"
+                          << dirpath
+                          << "' in open_dir()"
+                          << std::endl;
+            return 1;
+        } 
+
+        dbConn_->prepare(
+         "sftp_handle_ins_dir",
+         "insert into sftp.sftp_handle (handle_type,handle_name,handle_open,dir_id) values ($1, $2, $3, $4)"
+        );
+
+        auto result = pqw.prepared("sftp_handle_ins_dir")("D")(dirpath)(1)(row[0][0].as<int>()).exec();
+        pqw.commit();
+        *(log_.get()) << "Successfully opened dir handle at '"
+                      << dirpath
+                      << "'"
+                      << std::endl;
+
+        return 0;
+    }
+    catch (const std::exception & e)
+    {
+        *(log_.get()) << "Error executing SQL: "
+                      << e.what()
+                      << std::endl;
+        return 1;
+     }
     return 0;
 }
 
