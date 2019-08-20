@@ -1,3 +1,4 @@
+#include <string.h>
 #include <sys/types.h>
 
 #include <cstring>
@@ -43,7 +44,7 @@ static int init()
 
           dbConn_->prepare(
             "sftp_file_qry",
-            "select * from sftp.sftp_file where file_name = $1"
+            "select file_id,file_name,file_type,attr_id,dir_id from sftp.sftp_file where file_name = $1"
           );
 
           dbConn_->prepare(
@@ -57,14 +58,14 @@ static int init()
 
          dbConn_->prepare(
             "sftp_dir_qry",
-            "select * from sftp.sftp_dir where dir_fqn = $1"
+            "select dir_id,dir_name,dir_fqn,dir_type,attr_id,parent_dir_id from sftp.sftp_dir where dir_fqn = $1"
           );
 
           dbConn_->prepare(
             "sftp_handle_ins",
             "insert into sftp.sftp_handle\
-            (handle_id, handle_type,handle_name,handle_open,dir_id)\
-             values (DEFAULT, $1, $2, $3, $4)\
+            (handle_id, handle_type,handle_name,handle_open,dir_id,file_id)\
+             values (DEFAULT, $1, $2, $3, $4, $5)\
             RETURNING handle_id;"
           );
 
@@ -100,6 +101,32 @@ static int insert_sftp_attrs(
 
 }
 */
+
+static std::string date_time_now()
+{
+    std::time_t t = std::time(nullptr);
+    std::tm tm = *std::localtime(&t);
+
+    std::stringstream tstmp;
+    tstmp << std::put_time(&tm, "%FT%T");
+
+    return tstmp.str();
+}
+
+static void split_file_path(const std::string & path, std::string & dir, std::string & file)
+{
+    auto pos = path.rfind("/");
+    
+    if (pos == std::string::npos)
+    {
+       dir.assign("."); 
+    }
+    else
+    {
+        dir = path.substr(0, pos);
+        file = path.substr(pos+1);
+    }
+}
 
 static void do_sql(const std::string & data)
 {
@@ -157,45 +184,72 @@ extern "C" int sftp_cf_open_file(u_int32_t rqstid,
         
          pqxx::work pqw(*dbConn_);
 
-         dbConn_->prepare(
-         "sftp_find_file",
-         "select * from sftp.sftp_file where file_name = $1"
-        );
+         std::string dir, file;
+         split_file_path(filename, dir, file);
 
-        auto row = pqw.prepared("sftp_find_file")(filename).exec();
-/*
-        if (row.size() < 1)
+         // TO DO canonicalize
+        auto dir_row = pqw.prepared("sftp_dir_qry")(dir).exec();
+        if (dir_row.size() < 1)
         {
-             dbConn_->prepare(
-             "sftp_ins_file",
-             "insert into sftp.sftp_file (file_name, file_type"
-             );
-
-            *(log_.get()) << "ERROR: Couldn't locate directory '"
-                          << dirpath
-                          << "' in open_dir()"
+            *(log_.get()) << "ERROR: no directory with name '"
+                          << dir 
+                          << "' found in open_file(); ."
                           << std::endl;
             return 1;
-        } 
+        }
+        auto dir_id = dir_row[0][0].as<int>(); 
 
-        dbConn_->prepare(
-         "sftp_handle_ins_handle",
-         "insert into sftp.sftp_handle (handle_id, handle_type,handle_name,handle_open,dir_id) values (DEFAULT, $1, $2, $3, $4)\
-         RETURNING handle_id;"
-        );
+        auto file_row = pqw.prepared("sftp_find_file")(filename).exec();
 
-        auto result = pqw.prepared("sftp_handle_ins_handle")("D")(dirpath)(1)(row[0][0].as<int>()).exec();
+        int file_id;
+        if (file_row.size() < 1)
+        {
+            *(log_.get()) << "No file with name '"
+                          << filename
+                          << "' found in open_file(); creating."
+                          << std::endl;
 
+            auto now = date_time_now();
+            auto attr_row = pqw.prepared("sftp_attrs_ins")(
+                            flags)(
+                            1000)(
+                            1000)(
+                            now)(
+                            now).exec();
 
+           if (attr_row.affected_rows() < 1)
+           {
+                *(log_.get()) << "ERROR: Couldn't create file attrs in open_file()"
+                              << std::endl;
+                return 1;
+ 
+           }
+           int attr_id = attr_row[0][0].as<int>();
+           file_row = pqw.prepared("sftp_file_ins")(
+                   file)(
+                   "F")(
+                   attr_id)(
+                   dir_id).exec();
+
+           if (file_row.affected_rows() < 1)
+           {
+                *(log_.get()) << "ERROR: Couldn't create file in open_file()"
+                              << std::endl;
+                return 1;
+ 
+           }
+        }
+        file_id = file_row[0][0].as<int>();   
+
+        auto result = pqw.prepared("sftp_handle_ins")("F")(file)(1)(0)(file_id).exec();
         *handle = result[0][0].as<int>();
 
         pqw.commit();
 
-        *(log_.get()) << "Successfully opened dir handle at '"
-                      << dirpath
+        *(log_.get()) << "Successfully opened file handle at '"
+                      << filename 
                       << "'"
                       << std::endl;
-*/
         return 0;
     }
     catch (const std::exception & e)
@@ -229,12 +283,7 @@ extern "C" int sftp_cf_open_dir(u_int32_t rqstid,
                       << std::endl;
         
          pqxx::work pqw(*dbConn_);
-/*
-         dbConn_->prepare(
-         "sftp_find_dir",
-         "select * from sftp.sftp_dir where dir_fqn = $1"
-        );
-*/
+
         auto row = pqw.prepared("sftp_dir_qry")(dirpath).exec();
 
         if (row.size() < 1)
@@ -245,14 +294,8 @@ extern "C" int sftp_cf_open_dir(u_int32_t rqstid,
                           << std::endl;
             return 1;
         } 
-/*
-        dbConn_->prepare(
-         "sftp_handle_ins_handle",
-         "insert into sftp.sftp_handle (handle_id, handle_type,handle_name,handle_open,dir_id) values (DEFAULT, $1, $2, $3, $4)\
-         RETURNING handle_id;"
-        );
-*/
-        auto result = pqw.prepared("sftp_handle_ins")("D")(dirpath)(1)(row[0][0].as<int>()).exec();
+
+        auto result = pqw.prepared("sftp_handle_ins")("D")(dirpath)(1)(row[0][0].as<int>())(0).exec();
 
         *handle = result[0][0].as<int>();
 
