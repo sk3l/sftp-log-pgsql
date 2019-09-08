@@ -9,7 +9,7 @@
 #include <sstream>
 #include <pqxx/pqxx>
 #include <pqxx/except>
-
+#include <pqxx/binarystring>
 #include "sftp-callback.h"
 #include "sftp-plugin.h"
 
@@ -60,14 +60,14 @@ static int init()
              "sftp_file_read",
              "select substring(f.file_data from $1 for $2) as chunk from sftp.sftp_file f join sftp.sftp_handle h\
              on f.file_id = h.handle_id\
-             where h.handle_open = 't' and  h.handle_id = $3" 
+             where h.handle_open = 't' and  h.handle_id = $3"
              );
 
           dbConn_->prepare(
              "sftp_file_write",
              "select overlay(f.file_data placing $1 from $2 for $3)\
              from sftp.sftp_file\
-             where h.handle_open = 't' and  h.handle_id = $4" 
+             where h.handle_open = 't' and  h.handle_id = $4"
            );
 
          dbConn_->prepare(
@@ -383,37 +383,56 @@ extern "C" int sftp_cf_read(u_int32_t rqstid,
         u_char * data,
         int * len)
 {
-    if (init() != 0)
+    try
+    {
+       if (init() != 0)
+           return 1;
+
+       *(log_.get()) << "Invoking sftp_cf_read()"
+                     << std::endl;
+
+
+       std::stringstream ss;
+       ss << "Received read event,"
+          << " offset = "
+          << offset
+          << ", length = "
+          << length
+          << ", handle = "
+          << handle;
+
+       std::string hstr(handle);
+
+       pqxx::work pqw(*dbConn_);
+       auto result = pqw.prepared("sftp_file_read")(offset)(length)(std::stoi(hstr)).exec();
+
+       if (result.affected_rows() < 1)
+       {
+               *(log_.get()) << "ERROR: Couldn't locate an open handle id='"
+                             << handle
+                             << "' in close()"
+                             << std::endl;
+
+              return 1;
+       }
+
+       pqxx::binarystring bstr(result[0][0]);
+
+       pqw.commit();
+
+       std::memcpy(data, bstr.data(), length);
+       *len = bstr.size();
+
+        return 0;
+    }
+    catch (const std::exception & e)
+    {
+        *(log_.get()) << "Error executing SQL: "
+                      << e.what()
+                      << std::endl;
         return 1;
 
-    *(log_.get()) << "Invoking sftp_cf_read()"
-                  << std::endl;
-
-
-    std::stringstream ss;
-    ss << "Received read event,"
-       << " offset = "
-       << offset
-       << ", length = "
-       << length
-       << ", handle = "
-       << handle;
-
-    pqxx::work pqw(*dbConn_);
-    auto result = pqw.prepared("sftp_file_read")(handle).exec();
-
-    if (result.affected_rows() < 1)
-    {
-            *(log_.get()) << "ERROR: Couldn't locate an open handle id='"
-                          << handle
-                          << "' in close()"
-                          << std::endl;
-
-           return 1;
     }
-
-    pqw.commit();
-    return 0;
 }
 
 extern "C" int sftp_cf_read_dir(u_int32_t rqstid,
