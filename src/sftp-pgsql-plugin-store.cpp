@@ -56,6 +56,20 @@ static int init()
              RETURNING file_id"
            );
 
+          dbConn_->prepare(
+             "sftp_file_read",
+             "select substring(f.file_data from $1 for $2) as chunk from sftp.sftp_file f join sftp.sftp_handle h\
+             on f.file_id = h.handle_id\
+             where h.handle_open = 't' and  h.handle_id = $3" 
+             );
+
+          dbConn_->prepare(
+             "sftp_file_write",
+             "select overlay(f.file_data placing $1 from $2 for $3)\
+             from sftp.sftp_file\
+             where h.handle_open = 't' and  h.handle_id = $4" 
+           );
+
          dbConn_->prepare(
             "sftp_dir_qry",
             "select dir_id,dir_name,dir_fqn,dir_type,attr_id,parent_dir_id from sftp.sftp_dir where dir_fqn = $1"
@@ -174,12 +188,7 @@ extern "C" int sftp_cf_open_file(u_int32_t rqstid,
         *(log_.get()) << "Invoking sftp_cf_open_file()"
                   << std::endl;
 
-
-         //std::stringstream ss;
-         //ss << "Received open_dir event, path ="
-         //  << dirpath;
-
-        *(log_.get()) << "Invoking sql for open_dir()"
+        *(log_.get()) << "Invoking sql for open_file()"
                       << std::endl;
 
          pqxx::work pqw(*dbConn_);
@@ -342,12 +351,6 @@ extern "C" int sftp_cf_close(u_int32_t rqstid,
           << handle;
 
        pqxx::work pqw(*dbConn_);
-       /*
-       dbConn_->prepare(
-            "sftp_close_handle",
-            "update sftp.sftp_handle set handle_open = false where handle_id = $1 and handle_open = true"
-       );
-       */
        auto result = pqw.prepared("sftp_handle_udt_close")(handle).exec();
 
        if (result.affected_rows() < 1)
@@ -376,7 +379,9 @@ extern "C" int sftp_cf_close(u_int32_t rqstid,
 extern "C" int sftp_cf_read(u_int32_t rqstid,
         const char * handle,
         u_int64_t offset,
-        u_int32_t length)
+        u_int32_t length,
+        u_char * data,
+        int * len)
 {
     if (init() != 0)
         return 1;
@@ -394,8 +399,20 @@ extern "C" int sftp_cf_read(u_int32_t rqstid,
        << ", handle = "
        << handle;
 
-    do_sql(ss.str());
+    pqxx::work pqw(*dbConn_);
+    auto result = pqw.prepared("sftp_file_read")(handle).exec();
 
+    if (result.affected_rows() < 1)
+    {
+            *(log_.get()) << "ERROR: Couldn't locate an open handle id='"
+                          << handle
+                          << "' in close()"
+                          << std::endl;
+
+           return 1;
+    }
+
+    pqw.commit();
     return 0;
 }
 
