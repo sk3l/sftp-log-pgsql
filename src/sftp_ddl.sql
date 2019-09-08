@@ -33,7 +33,7 @@ create table sftp.sftp_dir (
 create table sftp.sftp_file (
    file_id          serial not null primary key,
    file_name        text not null,
-   file_data          text not null,
+   file_data          text null,
    file_type         char(1)  null,
    attr_id          serial   not null references sftp.sftp_attrs,
    -- parent dir
