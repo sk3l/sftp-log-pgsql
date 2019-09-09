@@ -44,7 +44,7 @@ static int init()
 
           dbConn_->prepare(
             "sftp_file_qry",
-            "select file_id,file_name,file_type,attr_id,dir_id from sftp.sftp_file where file_name = $1"
+            "select file_id,file_name,file_type,attr_id,dir_id from sftp.sftp_file where dir_id = $1 and file_name = $2"
           );
 
           dbConn_->prepare(
@@ -59,7 +59,7 @@ static int init()
           dbConn_->prepare(
              "sftp_file_read",
              "select substring(f.file_data from $1 for $2) as chunk from sftp.sftp_file f join sftp.sftp_handle h\
-             on f.file_id = h.handle_id\
+             on f.file_id = h.file_id\
              where h.handle_open = 't' and  h.handle_id = $3"
              );
 
@@ -208,7 +208,7 @@ extern "C" int sftp_cf_open_file(u_int32_t rqstid,
         }
         auto dir_id = dir_row[0][0].as<int>();
 
-        auto file_row = pqw.prepared("sftp_file_qry")(filename).exec();
+        auto file_row = pqw.prepared("sftp_file_qry")(dir_id)(file).exec();
 
         int file_id;
         if (file_row.size() < 1)
@@ -377,7 +377,8 @@ extern "C" int sftp_cf_close(u_int32_t rqstid,
 }
 
 extern "C" int sftp_cf_read(u_int32_t rqstid,
-        const char * handle,
+        const char * handle_name,
+        int handle,
         u_int64_t offset,
         u_int32_t length,
         u_char * data,
@@ -401,16 +402,14 @@ extern "C" int sftp_cf_read(u_int32_t rqstid,
           << ", handle = "
           << handle;
 
-       std::string hstr(handle);
-
        pqxx::work pqw(*dbConn_);
-       auto result = pqw.prepared("sftp_file_read")(offset)(length)(std::stoi(hstr)).exec();
+       auto result = pqw.prepared("sftp_file_read")(offset)(length)(handle).exec();
 
        if (result.affected_rows() < 1)
        {
                *(log_.get()) << "ERROR: Couldn't locate an open handle id='"
                              << handle
-                             << "' in close()"
+                             << "' in read()"
                              << std::endl;
 
               return 1;
