@@ -454,29 +454,67 @@ extern "C" int sftp_cf_read_dir(u_int32_t rqstid,
 }
 
 extern "C" int sftp_cf_write(u_int32_t rqstid,
-        const char * handle,
+        const char * hstr,
+        int handle,
         u_int64_t offset,
-        const char * data)
+        u_int32_t length,
+        u_char * data,
+        int * len)
 {
-    if (init() != 0)
+    try
+    {
+       if (init() != 0)
+           return 1;
+
+       *(log_.get()) << "Invoking sftp_cf_write()"
+                     << std::endl;
+
+       std::stringstream ss;
+       ss << "Received write event,"
+          << " offset = "
+          << offset
+          << ", length = "
+          << length
+          << ", handle = "
+          << handle;
+
+       // ***********
+       // TO DO : check file handle permissions to ensure WRITEable
+       
+
+       pqxx::work pqw(*dbConn_);
+       auto result = pqw.prepared("sftp_file_write")()(offset)(length)(handle).exec();
+
+       if (result.affected_rows() < 1)
+       {
+               *(log_.get()) << "ERROR: Couldn't locate an open handle id='"
+                             << handle
+                             << "' in write()"
+                             << std::endl;
+
+              return 1;
+       }
+
+
+       pqw.commit();
+
+
+       // ***********
+       // TO DO : establish true byte count written 
+ 
+       *len = length;
+
+        return 0;
+    }
+    catch (const std::exception & e)
+    {
+        *(log_.get()) << "Error executing SQL: "
+                      << e.what()
+                      << std::endl;
         return 1;
 
-    *(log_.get()) << "Invoking sftp_cf_write()"
-                  << std::endl;
+    }
 
-
-    std::stringstream ss;
-    ss << "Received write event,"
-       << ", offset = "
-       << offset
-       << ", length = "
-       << std::strlen(data)
-       << ", handle = "
-       << handle;
-
-    do_sql(ss.str());
-
-    return 0;
 }
 
 extern "C" int sftp_cf_remove(u_int32_t rqstid,
