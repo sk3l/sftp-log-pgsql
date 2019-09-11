@@ -10,6 +10,7 @@
 #include <pqxx/pqxx>
 #include <pqxx/except>
 #include <pqxx/binarystring>
+#include <pqxx/transaction>
 #include "sftp-callback.h"
 #include "sftp-plugin.h"
 
@@ -65,9 +66,12 @@ static int init()
 
           dbConn_->prepare(
              "sftp_file_write",
-             "select overlay(f.file_data placing $1 from $2 for $3)\
-             from sftp.sftp_file\
-             where h.handle_open = 't' and  h.handle_id = $4"
+             "update sftp.sftp_file as f\
+             set file_data =\
+                case when file_data is NULL then $1\
+                else overlay(file_data placing $1 from $2 for $3) end\
+             from sftp.sftp_handle h\
+             where f.file_id = h.file_id and h.handle_open = 't' and h.handle_id = $4"
            );
 
          dbConn_->prepare(
@@ -402,8 +406,11 @@ extern "C" int sftp_cf_read(u_int32_t rqstid,
           << ", handle = "
           << handle;
 
+       // ***********
+       // TO DO : check file handle permissions to ensure READable
+ 
        pqxx::work pqw(*dbConn_);
-       auto result = pqw.prepared("sftp_file_read")(offset)(length)(handle).exec();
+       auto result = pqw.prepared("sftp_file_read")((offset == 0?1:offset))(length)(handle).exec();
 
        if (result.affected_rows() < 1)
        {
@@ -480,10 +487,9 @@ extern "C" int sftp_cf_write(u_int32_t rqstid,
 
        // ***********
        // TO DO : check file handle permissions to ensure WRITEable
-       
 
        pqxx::work pqw(*dbConn_);
-       auto result = pqw.prepared("sftp_file_write")()(offset)(length)(handle).exec();
+       auto result = pqw.prepared("sftp_file_write")(pqw.esc_raw(data, length))(offset == 0?1:offset)(length)(handle).exec();
 
        if (result.affected_rows() < 1)
        {
